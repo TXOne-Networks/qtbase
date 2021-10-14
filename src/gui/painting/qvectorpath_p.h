@@ -92,7 +92,8 @@ public:
         // Shape rendering specifiers...
         OddEvenFill             = 0x1000,
         WindingFill             = 0x2000,
-        ImplicitClose           = 0x4000
+        ImplicitClose           = 0x4000,
+        ExplicitOpen            = 0x8000
     };
 
     // ### Falcon: introduca a struct XY for points so lars is not so confused...
@@ -117,6 +118,7 @@ public:
 
     inline bool isCacheable() const { return m_hints & ShouldUseCacheHint; }
     inline bool hasImplicitClose() const { return m_hints & ImplicitClose; }
+    inline bool hasExplicitOpen() const { return m_hints & ExplicitOpen; }
     inline bool hasWindingFill() const { return m_hints & WindingFill; }
 
     inline void makeCacheable() const { m_hints |= ShouldUseCacheHint; m_cache = 0; }
@@ -135,7 +137,7 @@ public:
         case QPaintEngine::ConvexMode: return ConvexPolygonHint | ImplicitClose;
         case QPaintEngine::OddEvenMode: return PolygonHint | OddEvenFill | ImplicitClose;
         case QPaintEngine::WindingMode: return PolygonHint | WindingFill | ImplicitClose;
-        case QPaintEngine::PolylineMode: return PolygonHint;
+        case QPaintEngine::PolylineMode: return PolygonHint | ExplicitOpen;
         default: return 0;
         }
     }
