@@ -134,6 +134,7 @@ public:
 
     void operator()() const
     {
+        HRESULT hRes = CoInitialize(NULL);
 #ifndef Q_OS_WINCE
         const UINT oldErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
 #endif
@@ -141,6 +142,8 @@ public:
 #ifndef Q_OS_WINCE
         SetErrorMode(oldErrorMode);
 #endif
+        if(hRes != S_FALSE)
+            CoUninitialize();
     }
 
 private:
