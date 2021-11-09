@@ -627,8 +627,9 @@ void QFileSystemModel::fetchMore(const QModelIndex &parent)
     if (!d->setRootPath)
         return;
     QFileSystemModelPrivate::QFileSystemNode *indexNode = d->node(parent);
-    if (indexNode->populatedChildren)
-        return;
+// Louis: Do not check node dirty flag 2021/11/06
+//    if (indexNode->populatedChildren)
+//        return;
     indexNode->populatedChildren = true;
 #ifndef QT_NO_FILESYSTEMWATCHER
     d->fileInfoGatherer.list(filePath(parent));
