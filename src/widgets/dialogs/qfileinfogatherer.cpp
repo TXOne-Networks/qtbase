@@ -311,9 +311,7 @@ void QFileInfoGatherer::getFileInfos(const QString &path, const QStringList &fil
         allFiles.append(fileInfo.fileName());
         fetch(fileInfo, base, firstTime, updatedFiles, path);
     }
-    //Louis 20211102 19:58.
-    //If all files and folders are removed in this path, statement, "if (!allFiles.isEmpty())", will block notification about this change.
-    //if (!allFiles.isEmpty())
+    if (!allFiles.isEmpty())
         emit newListOfFiles(path, allFiles);
 
     QStringList::const_iterator filesIt = filesToCheck.constBegin();
