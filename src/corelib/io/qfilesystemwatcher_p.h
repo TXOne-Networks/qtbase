@@ -93,7 +93,7 @@ public:
     QFileSystemWatcherPrivate();
     void init();
     void initPollerEngine();
-
+    void initFakePollerEngine();
     QFileSystemWatcherEngine *native, *poller;
     QStringList files, directories;
 

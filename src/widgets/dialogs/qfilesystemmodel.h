@@ -69,6 +69,7 @@ public:
         FilePermissions = Qt::UserRole + 3
     };
 
+    explicit QFileSystemModel(bool fakeEngineEnable, QObject *parent = Q_NULLPTR);
     explicit QFileSystemModel(QObject *parent = Q_NULLPTR);
     ~QFileSystemModel();
 

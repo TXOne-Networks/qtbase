@@ -48,6 +48,7 @@
 #endif
 
 #include "qfilesystemwatcher_polling_p.h"
+#include "qfilesystemwatcher_fakepolling_p.h"
 #if defined(Q_OS_WIN)
 #  include "qfilesystemwatcher_win_p.h"
 #elif defined(USE_INOTIFY)
@@ -114,6 +115,24 @@ void QFileSystemWatcherPrivate::initPollerEngine()
                      SIGNAL(directoryChanged(QString,bool)),
                      q,
                      SLOT(_q_directoryChanged(QString,bool)));
+}
+
+void QFileSystemWatcherPrivate::initFakePollerEngine()
+{
+    if(poller)
+        return;
+
+    Q_Q(QFileSystemWatcher);
+    poller = new QFakePollingFileSystemWatcherEngine(q); // that was a mouthful
+    QObject::connect(poller,
+                     SIGNAL(fileChanged(QString,bool)),
+                     q,
+                     SLOT(_q_fileChanged(QString,bool)));
+    QObject::connect(poller,
+                     SIGNAL(directoryChanged(QString,bool)),
+                     q,
+                     SLOT(_q_directoryChanged(QString,bool)));
+
 }
 
 void QFileSystemWatcherPrivate::_q_fileChanged(const QString &path, bool removed)
@@ -314,7 +333,13 @@ QStringList QFileSystemWatcher::addPaths(const QStringList &paths)
             qDebug() << "QFileSystemWatcher: skipping native engine, using only polling engine";
             d_func()->initPollerEngine();
             engine = d->poller;
-        } else if(forceName == QLatin1String("native")) {
+        } 
+        else if(forceName == QLatin1String("fakepoller")){
+            qDebug() << "QFileSystemWatcher: skipping native engine, using only fake polling engine";
+            d_func()->initFakePollerEngine();
+            engine = d->poller;
+        }
+        else if(forceName == QLatin1String("native")) {
             qDebug() << "QFileSystemWatcher: skipping polling engine, using only native engine";
             engine = d->native;
         }

@@ -211,7 +211,10 @@ public:
         delayedSortTimer.setSingleShot(true);
     }
 
-    void init();
+    ~QFileSystemModelPrivate(){
+        delete fileInfoGatherer;
+    }
+    void init(bool fakeEngineEnable = false);
     /*
       \internal
 
@@ -290,7 +293,7 @@ public:
 
     QDir rootDir;
 #ifndef QT_NO_FILESYSTEMWATCHER
-    QFileInfoGatherer fileInfoGatherer;
+    QFileInfoGatherer* fileInfoGatherer;
 #endif
     QTimer delayedSortTimer;
     bool forceSort;

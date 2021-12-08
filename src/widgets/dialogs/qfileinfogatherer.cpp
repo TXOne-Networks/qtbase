@@ -59,6 +59,25 @@ Q_AUTOTEST_EXPORT bool qt_test_isFetchedRoot()
 }
 #endif
 
+QFileInfoGatherer::QFileInfoGatherer(QString watcherName, QObject *parent)
+    : QThread(parent), abort(false),
+#ifndef QT_NO_FILESYSTEMWATCHER
+      watcher(0),
+#endif
+#ifdef Q_OS_WIN
+      m_resolveSymlinks(true),
+#endif
+      m_iconProvider(&defaultProvider)
+{
+#ifndef QT_NO_FILESYSTEMWATCHER
+    watcher = new QFileSystemWatcher(this);
+    watcher->setObjectName(watcherName);
+    connect(watcher, SIGNAL(directoryChanged(QString)), this, SLOT(list(QString)));
+    connect(watcher, SIGNAL(fileChanged(QString)), this, SLOT(updateFile(QString)));
+#endif
+    start(LowPriority);
+}
+
 /*!
     Creates thread
 */
