@@ -123,6 +123,71 @@ static inline QColor getSysColor(int index)
 }
 
 #ifndef QT_NO_WINCE_SHELLSDK
+
+#ifndef Q_OS_WINCE
+static BOOL CALLBACK EnumResourceCallBack(HMODULE hExe, LPCTSTR lpszType, LPTSTR lpszName, LPARAM lParam)
+{
+	// Find the icon directory whose identifier is lpszName.
+	HRSRC hResource = FindResource(hExe, lpszName, lpszType);
+	if (!hResource) return TRUE;
+
+	// Load the icon directory to memory
+	HGLOBAL hIconDirMem = LoadResource(hExe, hResource);
+	if (!hIconDirMem) return TRUE;
+
+	// Lock the icon directory.
+	LPVOID lpIconDirResource = LockResource(hIconDirMem);
+	if (!lpIconDirResource) return TRUE;
+
+	// Get the identifier of the icon that is most appropriate for the video display.
+	int nID = LookupIconIdFromDirectoryEx((PBYTE) lpIconDirResource, TRUE, 0, 0, LR_DEFAULTCOLOR);
+	if (!nID) return TRUE;
+
+	// Find the bits for the nID icon.
+	hResource = FindResource(hExe, MAKEINTRESOURCE(nID), MAKEINTRESOURCE(RT_ICON));
+
+	// Load and lock the icon.
+	HGLOBAL hIconMem = LoadResource(hExe, hResource);
+	if (!hIconMem) return TRUE;
+	LPVOID lpIconResource = LockResource(hIconMem);
+	if (!lpIconResource) return TRUE;
+
+	// Create a handle to the icon.
+    // https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createiconfromresourceex
+	*(HICON*)lParam = CreateIconFromResourceEx((PBYTE) lpIconResource, SizeofResource(hExe, hResource), TRUE, 0x00030000,
+		0, 0, LR_DEFAULTCOLOR);
+
+	return *(HICON*)lParam ? FALSE : TRUE;
+}
+
+static bool GetShortcutTarget(const wchar_t* lnkPath, wchar_t* realPath, const int size)
+{
+
+    IShellLink*    psl     = NULL;
+    IPersistFile*  ppf     = NULL;
+    bool           bResult = false;
+    HRESULT        hRes    = S_FALSE;
+    do
+    {
+        hRes = CoInitialize(NULL);
+        if (FAILED(CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLink, (void **) &psl)))
+            break;
+        if (FAILED(psl->QueryInterface(IID_IPersistFile, (void **) &ppf)))
+            break;
+        if (FAILED(ppf->Load(lnkPath, STGM_READ)))
+            break;
+        if (NOERROR != psl->GetPath(realPath, size, NULL, 0))
+            break;
+        bResult = true;
+    } while (false);
+
+    if (ppf) ppf->Release();
+    if (psl) psl->Release();
+    if (hRes != S_FALSE) CoUninitialize();
+    return bResult;
+}
+#endif
+
 // QTBUG-48823/Windows 10: SHGetFileInfo() (as called by item views on file system
 // models has been observed to trigger a WM_PAINT on the mainwindow. Suppress the
 // behavior by running it in a thread.
@@ -134,6 +199,39 @@ public:
 
     void operator()() const
     {
+#ifndef Q_OS_WINCE
+        /*
+        Note 1:
+            In some legacy OS, SHGetFileInfo may update the last acess time of target file (e.g., *.exe, *.ico).
+            However, that behavior cause the critical-error if the target drive is read-only.
+            Although We set error mode to SEM_FAILCRITICALERRORS|SEM_NOOPENFILEERRORBOX to
+            ignore critical-error, OS still spends over 10 seconds to handle the critical-error.
+            Therefore, We don't use SHGetFileInfo in those files.
+        */
+        const wchar_t* extension = PathFindExtension(m_fileName);
+        if (extension && _wcsicmp(extension, L".exe") == 0)
+        {
+            HMODULE hExe = NULL;
+            memset(m_info, 0x0, sizeof(SHFILEINFO));
+            hExe = LoadLibraryEx(m_fileName, NULL, LOAD_LIBRARY_AS_DATAFILE);
+            if (hExe)
+            {
+                EnumResourceNames(hExe, RT_GROUP_ICON, EnumResourceCallBack, reinterpret_cast<LONG_PTR>(&m_info->hIcon));
+                FreeLibrary(hExe);
+            }
+            *m_result = true;
+            m_info->hIcon = m_info->hIcon ? m_info->hIcon : LoadIcon(NULL, IDI_APPLICATION);
+            return;
+        }
+        else if (extension && _wcsicmp(extension, L".ico") == 0)
+        {
+            memset(m_info, 0x0, sizeof(SHFILEINFO));
+            m_info->hIcon = reinterpret_cast<HICON>(LoadImage(NULL, m_fileName, IMAGE_ICON, 0, 0, LR_DEFAULTSIZE|LR_LOADFROMFILE));
+            *m_result = m_info->hIcon != NULL;
+            return;
+        }
+#endif
+
         HRESULT hRes = CoInitialize(NULL);
 #ifndef Q_OS_WINCE
         const UINT oldErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
@@ -159,6 +257,24 @@ static bool shGetFileInfoBackground(QWindowsThreadPoolRunner &r,
                                     SHFILEINFO *info, UINT flags,
                                     unsigned long  timeOutMSecs = 5000)
 {
+    /*
+    Note 2:
+        lnk is a file extension for a shortcut file used by Microsoft Windows to point to an file,
+        that is to say, a shortcut file can point to a read-only drive.
+        The Note 1 issue may be triggered If we directly call ShGetFileInfo to get icon of shortcut files
+        which point to a read-only drive.
+    */
+    const wchar_t* extension = PathFindExtension(fileName);
+    if (extension && _wcsicmp(extension, L".lnk") == 0)
+    {
+        wchar_t targetPath[MAX_PATH] = {0};
+        if (GetShortcutTarget(fileName, targetPath, MAX_PATH))
+        {
+            fileName = targetPath;
+            flags = flags | SHGFI_LINKOVERLAY;
+        }
+    }
+
     bool result = false;
     if (!r.run(ShGetFileInfoFunction(fileName, attributes, info, flags, &result), timeOutMSecs)) {
         qWarning().noquote() << "ShGetFileInfoBackground() timed out for "
