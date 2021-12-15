@@ -71,7 +71,7 @@
 #include <private/qsystemlibrary_p.h>
 
 #include <algorithm>
-
+#define Q_TRENDMICRO_TMPS
 #if defined(__IImageList_INTERFACE_DEFINED__) && defined(__IID_DEFINED__)
 #  define USE_IIMAGELIST
 #endif
@@ -124,9 +124,11 @@ static inline QColor getSysColor(int index)
 
 #ifndef QT_NO_WINCE_SHELLSDK
 
-#ifndef Q_OS_WINCE
+#ifdef Q_TRENDMICRO_TMPS
 static BOOL CALLBACK EnumResourceCallBack(HMODULE hExe, LPCTSTR lpszType, LPTSTR lpszName, LPARAM lParam)
 {
+    if (lParam == NULL) return FALSE;
+
 	// Find the icon directory whose identifier is lpszName.
 	HRSRC hResource = FindResource(hExe, lpszName, lpszType);
 	if (!hResource) return TRUE;
@@ -159,33 +161,6 @@ static BOOL CALLBACK EnumResourceCallBack(HMODULE hExe, LPCTSTR lpszType, LPTSTR
 
 	return *(HICON*)lParam ? FALSE : TRUE;
 }
-
-static bool GetShortcutTarget(const wchar_t* lnkPath, wchar_t* realPath, const int size)
-{
-
-    IShellLink*    psl     = NULL;
-    IPersistFile*  ppf     = NULL;
-    bool           bResult = false;
-    HRESULT        hRes    = S_FALSE;
-    do
-    {
-        hRes = CoInitialize(NULL);
-        if (FAILED(CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLink, (void **) &psl)))
-            break;
-        if (FAILED(psl->QueryInterface(IID_IPersistFile, (void **) &ppf)))
-            break;
-        if (FAILED(ppf->Load(lnkPath, STGM_READ)))
-            break;
-        if (NOERROR != psl->GetPath(realPath, size, NULL, 0))
-            break;
-        bResult = true;
-    } while (false);
-
-    if (ppf) ppf->Release();
-    if (psl) psl->Release();
-    if (hRes != S_FALSE) CoUninitialize();
-    return bResult;
-}
 #endif
 
 // QTBUG-48823/Windows 10: SHGetFileInfo() (as called by item views on file system
@@ -199,50 +174,76 @@ public:
 
     void operator()() const
     {
-#ifndef Q_OS_WINCE
+#ifdef Q_TRENDMICRO_TMPS
         /*
-        Note 1:
-            In some legacy OS, SHGetFileInfo may update the last acess time of target file (e.g., *.exe, *.ico).
+        Note:
+            In some OS, SHGetFileInfo may update the last acess time of target file (e.g., *.exe, *.ico).
             However, that behavior cause the critical-error if the target drive is read-only.
             Although We set error mode to SEM_FAILCRITICALERRORS|SEM_NOOPENFILEERRORBOX to
             ignore critical-error, OS still spends over 10 seconds to handle the critical-error.
-            Therefore, We don't use SHGetFileInfo in those files.
+            Therefore, We don't use SHGetFileInfo on those files.
         */
+        memset(m_info, 0x0, sizeof(SHFILEINFO));
         const wchar_t* extension = PathFindExtension(m_fileName);
         if (extension && _wcsicmp(extension, L".exe") == 0)
         {
             HMODULE hExe = NULL;
-            memset(m_info, 0x0, sizeof(SHFILEINFO));
             hExe = LoadLibraryEx(m_fileName, NULL, LOAD_LIBRARY_AS_DATAFILE);
             if (hExe)
             {
                 EnumResourceNames(hExe, RT_GROUP_ICON, EnumResourceCallBack, reinterpret_cast<LONG_PTR>(&m_info->hIcon));
                 FreeLibrary(hExe);
             }
-            *m_result = true;
-            m_info->hIcon = m_info->hIcon ? m_info->hIcon : LoadIcon(NULL, IDI_APPLICATION);
+            *m_result = m_info->hIcon != NULL ? true :
+                this->SafeSHGetFileInfo(extension, m_attributes, m_info, sizeof(SHFILEINFO), m_flags|SHGFI_USEFILEATTRIBUTES);
             return;
         }
         else if (extension && _wcsicmp(extension, L".ico") == 0)
         {
-            memset(m_info, 0x0, sizeof(SHFILEINFO));
             m_info->hIcon = reinterpret_cast<HICON>(LoadImage(NULL, m_fileName, IMAGE_ICON, 0, 0, LR_DEFAULTSIZE|LR_LOADFROMFILE));
-            *m_result = m_info->hIcon != NULL;
+            *m_result = m_info->hIcon != NULL ? true :
+                this->SafeSHGetFileInfo(extension, m_attributes, m_info, sizeof(SHFILEINFO), m_flags|SHGFI_USEFILEATTRIBUTES);
             return;
         }
-#endif
+        else if (extension && _wcsicmp(extension, L".lnk") == 0)
+        {
+            *m_result = this->SafeSHGetFileInfo(L"", m_attributes, m_info, sizeof(SHFILEINFO), m_flags|SHGFI_USEFILEATTRIBUTES);
+            return;
+        }
 
-        HRESULT hRes = CoInitialize(NULL);
-#ifndef Q_OS_WINCE
+        *m_result = this->SafeSHGetFileInfo(m_fileName, m_attributes, m_info, sizeof(SHFILEINFO), m_flags);
+
+#else
+    #ifndef Q_OS_WINCE
         const UINT oldErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
-#endif
+    #endif
         *m_result = SHGetFileInfo(m_fileName, m_attributes, m_info, sizeof(SHFILEINFO), m_flags);
-#ifndef Q_OS_WINCE
+    #ifndef Q_OS_WINCE
         SetErrorMode(oldErrorMode);
+    #endif
 #endif
-        if(hRes != S_FALSE)
-            CoUninitialize();
     }
+
+#ifdef Q_TRENDMICRO_TMPS
+private:
+    DWORD_PTR SafeSHGetFileInfo(LPCWSTR pszPath, DWORD dwFileAttributes, SHFILEINFOW *psfi, UINT cbFileInfo, UINT uFlags) const
+    {
+        // Initializes the COM library on the current thread
+        HRESULT hRes = CoInitialize(NULL);
+        // Set error mode to ignore critical error
+        const UINT oldErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+        // Call SHGetFileInfo to get icon
+        DWORD_PTR result = SHGetFileInfo(pszPath, dwFileAttributes, psfi, cbFileInfo, uFlags);
+        // Restore error mode
+        SetErrorMode(oldErrorMode);
+        // Closes the COM library on the current thread
+        if(hRes != S_FALSE)
+        {
+            CoUninitialize();
+        }
+        return result;
+    }
+#endif
 
 private:
     const wchar_t *m_fileName;
@@ -257,24 +258,6 @@ static bool shGetFileInfoBackground(QWindowsThreadPoolRunner &r,
                                     SHFILEINFO *info, UINT flags,
                                     unsigned long  timeOutMSecs = 5000)
 {
-    /*
-    Note 2:
-        lnk is a file extension for a shortcut file used by Microsoft Windows to point to an file,
-        that is to say, a shortcut file can point to a read-only drive.
-        The Note 1 issue may be triggered If we directly call ShGetFileInfo to get icon of shortcut files
-        which point to a read-only drive.
-    */
-    const wchar_t* extension = PathFindExtension(fileName);
-    if (extension && _wcsicmp(extension, L".lnk") == 0)
-    {
-        wchar_t targetPath[MAX_PATH] = {0};
-        if (GetShortcutTarget(fileName, targetPath, MAX_PATH))
-        {
-            fileName = targetPath;
-            flags = flags | SHGFI_LINKOVERLAY;
-        }
-    }
-
     bool result = false;
     if (!r.run(ShGetFileInfoFunction(fileName, attributes, info, flags, &result), timeOutMSecs)) {
         qWarning().noquote() << "ShGetFileInfoBackground() timed out for "
