@@ -150,7 +150,7 @@ typedef struct _REPARSE_DATA_BUFFER {
 #    define FSCTL_GET_REPARSE_POINT CTL_CODE(FILE_DEVICE_FILE_SYSTEM, 42, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #  endif
 #endif // !defined(Q_OS_WINCE)
-
+#define Q_TRENDMICRO_TMPS
 QT_BEGIN_NAMESPACE
 
 Q_CORE_EXPORT int qt_ntfs_permission_lookup = 0;
@@ -1005,12 +1005,16 @@ bool QFileSystemEngine::fillMetaData(const QFileSystemEntry &entry, QFileSystemM
     // Check for ".lnk": Directories named ".lnk" should be skipped, corrupted
     // link files should still be detected as links.
     const QString origFilePath = entry.filePath();
+#ifdef Q_TRENDMICRO_TMPS
+    fname = entry;
+#else
     if (origFilePath.endsWith(QLatin1String(".lnk")) && !isDirPath(origFilePath, 0)) {
         data.entryFlags |= QFileSystemMetaData::WinLnkType;
         fname = QFileSystemEntry(readLink(entry));
     } else {
         fname = entry;
     }
+#endif
 
     if (fname.isEmpty()) {
         data.knownFlagsMask |= what;

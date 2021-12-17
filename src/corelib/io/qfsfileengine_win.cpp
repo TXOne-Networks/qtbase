@@ -68,7 +68,7 @@
 #ifndef PATH_MAX
 #define PATH_MAX FILENAME_MAX
 #endif
-
+#define Q_TRENDMICRO_TMPS
 QT_BEGIN_NAMESPACE
 
 #if !defined(Q_OS_WINCE)
@@ -854,7 +854,12 @@ QString QFSFileEngine::fileName(FileName file) const
             return entry.path();
         return entry.filePath();
     } else if (file == LinkName) {
+#ifdef Q_TRENDMICRO_TMPS
+        return d->fileEntry.filePath();
+#else
         return QFileSystemEngine::getLinkTarget(d->fileEntry, d->metaData).filePath();
+#endif
+
     } else if (file == BundleName) {
         return QString();
     }
