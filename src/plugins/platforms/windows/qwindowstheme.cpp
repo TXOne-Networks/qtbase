@@ -175,43 +175,83 @@ public:
     void operator()() const
     {
 #ifdef Q_TRENDMICRO_TMPS
+        DWORD flag;
+        wchar_t target[MAX_PATH] = {0};
+        bool isAttributeWritable = false;
+        memset(m_info, 0x0, sizeof(SHFILEINFO));
+        const wchar_t* targetExtension = NULL;
+        const wchar_t* extension = PathFindExtension(m_fileName);
+
+        if (extension && _wcsicmp(extension, L".lnk") == 0)
+        {
+            if (this->GetShortcutTarget(m_fileName, target, MAX_PATH) && GetFileSystemFlag(PathGetDriveNumber(target), &flag))
+            {
+                isAttributeWritable = !(flag & FILE_READ_ONLY_VOLUME);
+                targetExtension = PathFindExtension(target);
+            }
+        }
+        else if (GetFileSystemFlag(PathGetDriveNumber(m_fileName), &flag))
+        {
+            isAttributeWritable = !(flag & FILE_READ_ONLY_VOLUME);
+        }
+
         /*
         Note:
-            In some OS, SHGetFileInfo may update the last acess time of target file (e.g., *.exe, *.ico).
+            In some OSs, SHGetFileInfo update the last acess time of target file (*.exe, *.ico).
             However, that behavior cause the critical-error if the target drive is read-only.
             Although We set error mode to SEM_FAILCRITICALERRORS|SEM_NOOPENFILEERRORBOX to
             ignore critical-error, OS still spends over 10 seconds to handle the critical-error.
             Therefore, We don't use SHGetFileInfo on those files.
         */
-        memset(m_info, 0x0, sizeof(SHFILEINFO));
-        const wchar_t* extension = PathFindExtension(m_fileName);
-        if (extension && _wcsicmp(extension, L".exe") == 0)
+        if (!isAttributeWritable)
         {
-            HMODULE hExe = NULL;
-            hExe = LoadLibraryEx(m_fileName, NULL, LOAD_LIBRARY_AS_DATAFILE);
-            if (hExe)
+            if (extension && _wcsicmp(extension, L".exe") == 0)
             {
-                EnumResourceNames(hExe, RT_GROUP_ICON, EnumResourceCallBack, reinterpret_cast<LONG_PTR>(&m_info->hIcon));
-                FreeLibrary(hExe);
+                HMODULE hExe = NULL;
+                hExe = LoadLibraryEx(m_fileName, NULL, LOAD_LIBRARY_AS_DATAFILE|LOAD_LIBRARY_AS_IMAGE_RESOURCE);
+                if (hExe)
+                {
+                    EnumResourceNames(hExe, RT_GROUP_ICON, EnumResourceCallBack, reinterpret_cast<LONG_PTR>(&m_info->hIcon));
+                    FreeLibrary(hExe);
+                }
+                *m_result = m_info->hIcon != NULL ? true :
+                    this->SafeSHGetFileInfo(extension, m_attributes, m_info, sizeof(SHFILEINFO), m_flags|SHGFI_USEFILEATTRIBUTES);
+                return;
             }
-            *m_result = m_info->hIcon != NULL ? true :
-                this->SafeSHGetFileInfo(extension, m_attributes, m_info, sizeof(SHFILEINFO), m_flags|SHGFI_USEFILEATTRIBUTES);
-            return;
-        }
-        else if (extension && _wcsicmp(extension, L".ico") == 0)
-        {
-            m_info->hIcon = reinterpret_cast<HICON>(LoadImage(NULL, m_fileName, IMAGE_ICON, 0, 0, LR_DEFAULTSIZE|LR_LOADFROMFILE));
-            *m_result = m_info->hIcon != NULL ? true :
-                this->SafeSHGetFileInfo(extension, m_attributes, m_info, sizeof(SHFILEINFO), m_flags|SHGFI_USEFILEATTRIBUTES);
-            return;
-        }
-        else if (extension && _wcsicmp(extension, L".lnk") == 0)
-        {
-            *m_result = this->SafeSHGetFileInfo(L"", m_attributes, m_info, sizeof(SHFILEINFO), m_flags|SHGFI_USEFILEATTRIBUTES);
-            return;
+            else if (extension && _wcsicmp(extension, L".ico") == 0)
+            {
+                m_info->hIcon = reinterpret_cast<HICON>(LoadImage(NULL, m_fileName, IMAGE_ICON, 0, 0, LR_DEFAULTSIZE|LR_LOADFROMFILE));
+                *m_result = m_info->hIcon != NULL ? true :
+                    this->SafeSHGetFileInfo(extension, m_attributes, m_info, sizeof(SHFILEINFO), m_flags|SHGFI_USEFILEATTRIBUTES);
+                return;
+            }
+            else if (extension && _wcsicmp(extension, L".lnk") == 0)
+            {
+                bool isExe = targetExtension && _wcsicmp(targetExtension, L".exe") == 0;
+                bool isIco = targetExtension && _wcsicmp(targetExtension, L".ico") == 0;
+                if (targetExtension == NULL || isExe || isIco)
+                {
+                    *m_result = this->SafeSHGetFileInfo(
+                        targetExtension ? targetExtension : L"tmps", m_attributes, m_info, sizeof(SHFILEINFO), m_flags|SHGFI_USEFILEATTRIBUTES|SHGFI_LINKOVERLAY
+                    );
+                    return;
+                }
+            }
         }
 
-        *m_result = this->SafeSHGetFileInfo(m_fileName, m_attributes, m_info, sizeof(SHFILEINFO), m_flags);
+        /*
+        Note:
+            In some legacy OSs, SHGetFileInfo failed to retrieve lnk icon with SHGFI_OVERLAYINDEX.
+            https://microsoft.public.platformsdk.shell.narkive.com/s2MOlGSA/shgetfileinfo-fail-to-retrieve-icon-with-shgfi-overlayindex
+        */
+        if (_wcsicmp(extension, L".lnk") == 0)
+        {
+            *m_result = this->SafeSHGetFileInfo(m_fileName, m_attributes, m_info, sizeof(SHFILEINFO), SHGFI_ICON);
+        }
+        else
+        {
+            *m_result = this->SafeSHGetFileInfo(m_fileName, m_attributes, m_info, sizeof(SHFILEINFO), m_flags);
+        }
 
 #else
     #ifndef Q_OS_WINCE
@@ -226,6 +266,47 @@ public:
 
 #ifdef Q_TRENDMICRO_TMPS
 private:
+    bool GetFileSystemFlag(const int driveIndex, DWORD* pFlag) const
+    {
+        bool isSuccess = false;
+        if (driveIndex >= 0 && driveIndex <= 25)
+        {
+            wchar_t root[4] = {0};
+            PathBuildRoot(root, driveIndex);
+            // Set error mode to ignore critical error
+            const UINT oldErrorMode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+            isSuccess = GetVolumeInformation(root, NULL, 0, NULL, 0, pFlag, NULL, 0);
+            // Restore error mode
+            SetErrorMode(oldErrorMode);
+        }
+        return isSuccess;
+    }
+    bool GetShortcutTarget(const wchar_t* lnkPath, wchar_t* target, const int size) const
+    {
+
+        IShellLink*    psl     = NULL;
+        IPersistFile*  ppf     = NULL;
+        bool           bResult = false;
+        HRESULT        hRes    = S_FALSE;
+        do
+        {
+            hRes = CoInitialize(NULL);
+            if (FAILED(CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, IID_IShellLink, (void **) &psl)))
+                break;
+            if (FAILED(psl->QueryInterface(IID_IPersistFile, (void **) &ppf)))
+                break;
+            if (FAILED(ppf->Load(lnkPath, STGM_READ)))
+                break;
+            if (NOERROR != psl->GetPath(target, size, NULL, 0))
+                break;
+            bResult = true;
+        } while (false);
+
+        if (ppf) ppf->Release();
+        if (psl) psl->Release();
+        if (hRes != S_FALSE) CoUninitialize();
+        return bResult;
+    }
     DWORD_PTR SafeSHGetFileInfo(LPCWSTR pszPath, DWORD dwFileAttributes, SHFILEINFOW *psfi, UINT cbFileInfo, UINT uFlags) const
     {
         // Initializes the COM library on the current thread
