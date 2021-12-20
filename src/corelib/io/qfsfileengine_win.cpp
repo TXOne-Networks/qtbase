@@ -68,7 +68,6 @@
 #ifndef PATH_MAX
 #define PATH_MAX FILENAME_MAX
 #endif
-#define Q_TRENDMICRO_TMPS
 QT_BEGIN_NAMESPACE
 
 #if !defined(Q_OS_WINCE)

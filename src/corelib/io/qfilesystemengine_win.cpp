@@ -150,7 +150,6 @@ typedef struct _REPARSE_DATA_BUFFER {
 #    define FSCTL_GET_REPARSE_POINT CTL_CODE(FILE_DEVICE_FILE_SYSTEM, 42, METHOD_BUFFERED, FILE_ANY_ACCESS)
 #  endif
 #endif // !defined(Q_OS_WINCE)
-#define Q_TRENDMICRO_TMPS
 QT_BEGIN_NAMESPACE
 
 Q_CORE_EXPORT int qt_ntfs_permission_lookup = 0;

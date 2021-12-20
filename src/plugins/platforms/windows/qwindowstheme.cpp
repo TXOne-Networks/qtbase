@@ -71,7 +71,6 @@
 #include <private/qsystemlibrary_p.h>
 
 #include <algorithm>
-#define Q_TRENDMICRO_TMPS
 #if defined(__IImageList_INTERFACE_DEFINED__) && defined(__IID_DEFINED__)
 #  define USE_IIMAGELIST
 #endif
